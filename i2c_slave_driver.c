@@ -182,7 +182,7 @@ static IRAM_ATTR void s_i2c_handle_clock_stretch(i2c_slave_dev_private_t* i2c_sl
 {
     i2c_hal_context_t *hal = &i2c_slave->hal;
     i2c_slave_stretch_cause_t stretch_cause = 0xff;
-#ifdef CONFIG_IDF_TARGET_EPS32S2
+#ifdef CONFIG_IDF_TARGET_ESP32S2
     // ESP32S2 does not have a properly defined HAL.
     stretch_cause = hal->dev->status_reg.stretch_cause;
 #else
