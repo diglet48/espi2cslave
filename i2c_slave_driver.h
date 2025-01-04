@@ -73,5 +73,5 @@ esp_err_t i2c_slave_del(i2c_slave_device_t *dev);
 
 // send data to the master. The driver must be in the I2C_STATE_SEND state.
 // Data is copied to the internal buffer. Data that does not fit in the buffer
-// is ignored.
-esp_err_t i2c_slave_send_data(i2c_slave_device_t *dev, uint8_t* buf, uint8_t len);
+// is ignored. The amount of bytes copied will be written back to `*len`.
+esp_err_t i2c_slave_send_data(i2c_slave_device_t *dev, uint8_t* buf, uint8_t *len);

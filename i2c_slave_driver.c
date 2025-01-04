@@ -38,6 +38,7 @@
 #include "esp_private/gpio.h"
 #include "esp_private/periph_ctrl.h"
 #include "esp_heap_caps.h"
+#include "sdkconfig.h" // for switching on target types, until hal is fixed.
 #define LOG_LOCAL_LEVEL ESP_LOG_INFO
 #include "esp_log.h"
 #include "esp_check.h"
@@ -180,7 +181,13 @@ static IRAM_ATTR void s_i2c_handle_tx_fifo_wm(i2c_slave_dev_private_t* i2c_slave
 static IRAM_ATTR void s_i2c_handle_clock_stretch(i2c_slave_dev_private_t* i2c_slave)
 {
     i2c_hal_context_t *hal = &i2c_slave->hal;
-    int stretch_cause = hal->dev->status_reg.stretch_cause;
+    i2c_slave_stretch_cause_t stretch_cause = 0xff;
+#ifdef CONFIG_IDF_TARGET_EPS32S2
+    // ESP32S2 does not have a properly defined HAL.
+    stretch_cause = hal->dev->status_reg.stretch_cause;
+#else
+    i2c_ll_slave_get_stretch_cause(hal->dev, &stretch_cause);
+#endif
     i2c_slave_device_t *s = &i2c_slave->user_dev;
     //esp_rom_printf("stretch cause is %d\n", stretch_cause);
     //esp_rom_printf("buffer length is %d\n", hal->dev->status_reg.tx_fifo_cnt);
@@ -295,28 +302,36 @@ esp_err_t i2c_slave_new(i2c_slave_config_t* config, i2c_slave_device_t **result)
     i2c_ll_set_sda_timing(hal->dev, 10, 10);
     i2c_ll_set_tout(hal->dev, 32000);
 
-    // enable interrupts for stretch and receiveing, those always stay enabled.
+    // enable interrupts for stretch and receiving, those always stay enabled.
     i2c_ll_slave_enable_scl_stretch(hal->dev, true);
     hal->dev->scl_stretch_conf.stretch_protect_num = 500;
+    i2c_ll_slave_tx_auto_start_en(hal->dev, true);
     i2c_ll_slave_enable_rx_it(hal->dev);
     i2c_ll_enable_intr_mask(hal->dev, I2C_SLAVE_STRETCH_INT_ENA_M);
+    i2c_ll_update(hal->dev);
     *result = &dev->user_dev;
     return ESP_OK;
 }
 
-IRAM_ATTR esp_err_t i2c_slave_send_data(i2c_slave_device_t *dev, uint8_t* buf, uint8_t len)
+IRAM_ATTR esp_err_t i2c_slave_send_data(i2c_slave_device_t *dev, uint8_t* buf, uint8_t *len)
 {
     // write the data to the buffer
     ESP_RETURN_ON_FALSE_ISR(dev->state == I2C_STATE_SEND, ESP_ERR_INVALID_STATE, TAG, "Trying to send while not in send state!");
     i2c_slave_dev_private_t* i2c_slave = (i2c_slave_dev_private_t*)dev;
     i2c_hal_context_t *hal = &i2c_slave->hal;
-    len = MIN(len, sizeof(dev->buffer) - dev->bufend);
-    memcpy(dev->buffer + dev->bufend, buf, len);
-    dev->bufend += len;
-    if(len > 0) {
+    if(dev->bufstart == dev->bufend) {
+        // buffer is empty, reset the start/end to make sure we have room.
+        s_i2c_reset_buffer(i2c_slave);
+    }
+    uint8_t nbytes = MIN(*len, sizeof(dev->buffer) - dev->bufend);
+    memcpy(dev->buffer + dev->bufend, buf, nbytes);
+    dev->bufend += nbytes;
+    if(nbytes > 0) {
         // enable the tx interrupt so data gets copied into the fifo
         i2c_ll_slave_enable_tx_it(hal->dev);
     }
+    // tell the caller how many bytes were written.
+    *len = nbytes;
     return ESP_OK;
 }
 
